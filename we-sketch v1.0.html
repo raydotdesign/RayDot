@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>Studio NURBS DesignPro v5.3.0 - 教授修正版</title>
+    <style>
+        :root { --accent-color: #007AFF; --glass-bg: rgba(20, 20, 20, 0.95); --pinned-color: #FFD700; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; font-family: -apple-system, sans-serif; cursor: none; }
+        #app-container { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: #000; }
+        #webcam, #drawLayer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
+        #drawLayer { z-index: 10; }
+        
+        /* 標註線樣式 */
+        .guide { position: absolute; z-index: 100; pointer-events: none; display: none; background: rgba(255, 255, 255, 0.8); mix-blend-mode: difference; }
+        #hLine { width: 100%; height: 1px; top: 50%; left: 0; }
+        #vLine { width: 1px; height: 100%; left: 50%; top: 0; }
+
+        /* 自定義鼠標 */
+        #custom-cursor { position: fixed; pointer-events: none; z-index: 9999; display: flex; align-items: center; justify-content: center; transform: translate(-50%, -50%); }
+        #cursor-circle { border: 1.5px solid rgba(255,255,255,0.7); border-radius: 50%; box-sizing: border-box; position: relative; display: flex; align-items: center; }
+        #size-indicator { position: absolute; right: calc(100% + 10px); width: 30px; height: 30px; background: #000; border-radius: 50%; display: none; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: bold; border: 1px solid rgba(255,255,255,0.2); box-shadow: 0 0 8px var(--accent-color); animation: breath 1.5s infinite ease-in-out; z-index: 10000; }
+        @keyframes breath { 0% { box-shadow: 0 0 4px var(--accent-color); } 50% { box-shadow: 0 0 15px var(--accent-color); } 100% { box-shadow: 0 0 4px var(--accent-color); } }
+        #cursor-dot { position: absolute; width: 16px; height: 16px; left: 50%; top: 50%; transform: translate(-50%, -50%); } 
+        #cursor-dot::before, #cursor-dot::after { content:''; position: absolute; background: white; box-shadow: 0 0 2px rgba(0,0,0,1); }
+        #cursor-dot::before { width: 100%; height: 1.5px; top: 50%; left:0; transform: translateY(-50%); }
+        #cursor-dot::after { width: 1.5px; height: 100%; left: 50%; top:0; transform: translateX(-50%); }
+
+        /* 修正1：上方工具列 - 全螢幕隱藏邏輯 */
+        #top-controls { 
+            position: absolute; top: 0; left: 50%; transform: translateX(-50%); 
+            z-index: 1000; display: flex; gap: 20px; padding: 10px 30px; 
+            background: var(--glass-bg); backdrop-filter: blur(25px); 
+            border-radius: 0 0 15px 15px; border: 1px solid rgba(255,255,255,0.1); 
+            transition: 0.4s cubic-bezier(0.16, 1, 0.3, 1); 
+        }
+        body.is-fullscreen #top-controls { transform: translateX(-50%) translateY(-100%); opacity: 0; }
+        body.is-fullscreen #top-controls.reveal { transform: translateX(-50%) translateY(0); opacity: 1; }
+        
+        /* 修正2：側邊工具列 - 感應隱藏邏輯 */
+        #side-tools { 
+            position: absolute; right: 0; top: 50%; 
+            transform: translateY(-50%) translateX(calc(100% - 2px)); 
+            z-index: 1100; display: flex; flex-direction: column; gap: 10px; align-items: center; 
+            padding: 20px 15px; background: var(--glass-bg); border-radius: 30px 0 0 30px; 
+            border: 1px solid rgba(255,255,255,0.1); transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1); 
+            box-shadow: -10px 0 30px rgba(0,0,0,0.5); 
+        }
+        #side-tools.active { transform: translateY(-50%) translateX(0); }
+        
+        .icon-btn, .side-btn { background: transparent; border: none; color: #eee; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 8px; transition: 0.3s; }
+        .side-btn.active { color: var(--accent-color); background: rgba(255,255,255,0.1); }
+        .side-btn.pinned { color: var(--pinned-color); background: rgba(255, 215, 0, 0.15); }
+        svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.2; }
+
+        .slider-wrapper { position: relative; height: 110px; width: 30px; display: flex; justify-content: center; align-items: center; margin: 5px 0; background: linear-gradient(to bottom, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.05) 100%); clip-path: polygon(15% 0%, 85% 0%, 65% 100%, 35% 100%); border-radius: 4px; }
+        #sizeSlider { -webkit-appearance: none; width: 100px; height: 30px; background: transparent; transform: rotate(-90deg); cursor: pointer; outline: none; }
+        #sizeSlider::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: white; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.5); }
+
+        #tooltip { position: fixed; background: rgba(0,0,0,0.8); color: white; padding: 4px 10px; border-radius: 4px; font-size: 12px; pointer-events: none; z-index: 10000; display: none; white-space: nowrap; border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(5px); }
+        .color-dot { width: 18px; height: 18px; border-radius: 50%; cursor: pointer; border: 2px solid rgba(255,255,255,0.2); transition: 0.2s; position: relative; }
+        .color-dot.active { border-color: white; transform: scale(1.2); }
+        #customColorBtn { background: rgba(255,255,255,0.1); }
+        #customColorBtn svg { width: 12px; height: 12px; stroke: white; }
+
+        #honeycomb-panel { position: fixed; background: var(--glass-bg); padding: 15px; border-radius: 20px; display: none; grid-template-columns: repeat(7, 26px); gap: 6px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(30px); z-index: 2000; box-shadow: 0 10px 40px rgba(0,0,0,0.8); transform-origin: top right; }
+        .circle-dot { width: 24px; height: 24px; border-radius: 50%; cursor: pointer; transition: transform 0.15s; border: 1px solid rgba(255,255,255,0.1); }
+        .circle-dot:hover { transform: scale(1.3); z-index: 5; border-color: white; }
+        #eyedropperBtn { grid-column: span 2; height: 24px; border-radius: 12px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.1); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.15s; }
+        #eyedropperBtn:hover { transform: scale(1.1); background: rgba(255,255,255,0.2); border-color: white; }
+        #eyedropperBtn svg { width: 16px; height: 16px; }
+    </style>
+</head>
+<body id="main-body">
+
+<div id="custom-cursor">
+    <div id="size-indicator">10</div> <div id="cursor-circle"></div>
+    <div id="cursor-dot"></div>
+</div>
+<div id="tooltip"></div>
+
+<div id="app-container">
+    <video id="webcam" autoplay playsinline></video>
+    <canvas id="drawLayer"></canvas>
+    
+    <div class="guide" id="hLine"></div>
+    <div class="guide" id="vLine"></div>
+
+    <div id="top-controls">
+        <button class="icon-btn" onclick="toggleFS()" id="fsBtn" data-tip="全螢幕">
+            <svg viewBox="0 0 24 24"><path d="M3 8V5a2 2 0 0 1 2-2h3m8 0h3a2 2 0 0 1 2 2v3m0 8v3a2 2 0 0 1-2 2h-3m-8 0H5a2 2 0 0 1-2-2v-3"/></svg>
+        </button>
+        <button class="icon-btn" id="capBtn" data-tip="截圖"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
+        <button class="icon-btn" id="flipBtn" data-tip="鏡射"><svg viewBox="0 0 24 24"><path d="M22 12H2m20 0l-4-4m4 4l-4 4M2 12l4-4m-4 4l4 4"/></svg></button>
+        <button class="icon-btn" id="guideBtn" data-tip="標註線"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 8l-4 4 4 4"/></svg></button>
+    </div>
+
+    <div id="side-tools">
+        <button id="brushBtn" class="side-btn active" data-tip="藝術筆刷"><svg viewBox="0 0 24 24"><path d="M18 3l3 3-10.5 10.5-4-1 1-4L18 3z"/></svg></button>
+        <button id="pencilBtn" class="side-btn" data-tip="鉛筆"><svg viewBox="0 0 24 24"><path d="M17 3l4 4L7 21H3v-4L17 3z"/></svg></button>
+        <button id="highlighterBtn" class="side-btn" data-tip="螢光筆"><svg viewBox="0 0 24 24"><path d="M13 3l9 9-4 4-9-9 4-4z"/></svg></button>
+        <button id="eraserBtn" class="side-btn" data-tip="橡皮擦"><svg viewBox="0 0 24 24"><path d="M7 21h10M5 11l5-5 11 11-5 5-5-5"/></svg></button>
+        <hr style="width: 20px; border: 0.5px solid rgba(255,255,255,0.1); margin: 2px 0;">
+        <div class="color-picker" style="display:flex; flex-direction:column; gap:8px;">
+            <div class="color-dot active" style="background:#FF3B30" data-color="#FF3B30"></div>
+            <div class="color-dot" style="background:#007AFF" data-color="#007AFF"></div>
+            <div class="color-dot" style="background:#FFFF00" data-color="#FFFF00"></div>
+            <div id="customColorBtn" class="color-dot" data-tip="快速選色"><svg viewBox="0 0 24 24"><path d="M14.5 4a3.5 3.5 0 0 1 5 5l-8.5 8.5-5 1.5 1.5-5L14.5 4z"/></svg></div>
+        </div>
+        <div class="slider-wrapper">
+            <input type="range" id="sizeSlider" min="1" max="80" value="10">
+        </div>
+        <button id="undoBtn" class="side-btn" data-tip="復原"><svg viewBox="0 0 24 24"><path d="M9 14l-4-4l4-4M19 18v-4a4 4 0 0 0-4-4H5"/></svg></button>
+        <button id="redoBtn" class="side-btn" data-tip="重做"><svg viewBox="0 0 24 24"><path d="M15 14l4-4l-4-4M5 18v-4a4 4 0 0 1 4-4h10"/></svg></button>
+        <button id="clearBtn" class="side-btn" data-tip="清除"><svg viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button>
+        <hr style="width: 20px; border: 0.5px solid rgba(255,255,255,0.1); margin: 2px 0;">
+        <button id="pinBtn" class="side-btn" data-tip="釘選工具列">
+            <svg viewBox="0 0 24 24"><path d="M16 4.5V11l2 2v2h-5v7l-1 1-1-1v-7H6v-2l2-2V4.5a1.5 1.5 0 0 1 3 0V5h2v-.5a1.5 1.5 0 0 1 3 0z" fill="currentColor" stroke="none"/></svg>
+        </button>
+    </div>
+    <div id="honeycomb-panel"></div>
+</div>
+
+<script>
+    const v = document.getElementById('webcam'), canvas = document.getElementById('drawLayer'), ctx = canvas.getContext('2d');
+    const hCanvas = document.createElement('canvas'), hCtx = hCanvas.getContext('2d');
+    const sideTools = document.getElementById('side-tools'), topControls = document.getElementById('top-controls');
+    const panel = document.getElementById('honeycomb-panel'), tooltip = document.getElementById('tooltip');
+    const customBtn = document.getElementById('customColorBtn'), slider = document.getElementById('sizeSlider');
+    const cursor = document.getElementById('custom-cursor'), cCircle = document.getElementById('cursor-circle');
+    const sizeIndicator = document.getElementById('size-indicator');
+    const pinBtn = document.getElementById('pinBtn'), fsBtn = document.getElementById('fsBtn');
+
+    let paths = [], redoStack = [], currentPath = null;
+    let mirrored = false, currentColor = '#FF3B30', drawMode = 'brush', isPinned = false;
+    let hideTimeout = null, tipTimeout = null, indicatorTimeout = null;
+    
+    const HIDE_DELAY = 5000;
+    const TIP_DELAY = 500;
+
+    navigator.mediaDevices.getUserMedia({ video: { width: 1920, height: 1080 } }).then(s => v.srcObject = s);
+    function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; hCanvas.width = canvas.width; hCanvas.height = canvas.height; redraw(); }
+    window.onresize = resize; resize();
+
+    function initColors() {
+        const hues = [0, 40, 80, 120, 160, 200, 240, 280, 320]; 
+        const lights = [80, 65, 50, 30, 15]; 
+        let colorArray = [];
+        hues.forEach(h => lights.forEach(l => colorArray.push(`hsl(${h}, 80%, ${l}%)`)));
+        [100, 80, 65, 50, 35, 15, 10, 5, 0].forEach(g => colorArray.push(`hsl(0, 0%, ${g}%)`));
+        colorArray.forEach(c => {
+            const dot = document.createElement('div'); dot.className = 'circle-dot'; dot.style.background = c;
+            dot.onclick = () => { currentColor = c; customBtn.style.background = c; document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active')); customBtn.classList.add('active'); panel.style.display = 'none'; };
+            panel.appendChild(dot);
+        });
+        const dropperBtn = document.createElement('button');
+        dropperBtn.id = 'eyedropperBtn';
+        dropperBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.5 3a2.121 2.121 0 0 1 3 3L11 15.5l-3 3-1-1 3-3 7.5-7.5zM6 17v4h4L6 17z" fill="currentColor" stroke="none"/></svg>';
+        dropperBtn.onclick = async () => {
+            panel.style.display = 'none';
+            if (!window.EyeDropper) { alert('您的瀏覽器不支援滴管功能。'); return; }
+            const eyeDropper = new EyeDropper();
+            try {
+                const result = await eyeDropper.open();
+                currentColor = result.sRGBHex;
+                customBtn.style.background = currentColor;
+                document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
+                customBtn.classList.add('active');
+            } catch (e) {}
+        };
+        panel.appendChild(dropperBtn);
+    }
+    initColors();
+
+    function showTip(e, text) {
+        clearTimeout(tipTimeout);
+        tipTimeout = setTimeout(() => {
+            tooltip.innerText = text; tooltip.style.display = 'block';
+            tooltip.style.left = (e.clientX - tooltip.offsetWidth - 20) + 'px';
+            tooltip.style.top = (e.clientY - 10) + 'px';
+        }, TIP_DELAY);
+    }
+    function hideTip() { clearTimeout(tipTimeout); tooltip.style.display = 'none'; }
+    document.querySelectorAll('[data-tip]').forEach(btn => {
+        btn.addEventListener('mouseenter', (e) => showTip(e, btn.getAttribute('data-tip')));
+        btn.addEventListener('mouseleave', hideTip);
+    });
+
+    slider.oninput = () => {
+        sizeIndicator.innerText = slider.value;
+        sizeIndicator.style.display = 'flex';
+        cCircle.style.width = slider.value + 'px';
+        cCircle.style.height = slider.value + 'px';
+        clearTimeout(indicatorTimeout);
+        indicatorTimeout = setTimeout(() => { sizeIndicator.style.display = 'none'; }, 1000);
+    };
+
+    pinBtn.onclick = () => {
+        isPinned = !isPinned;
+        pinBtn.classList.toggle('pinned', isPinned);
+        pinBtn.setAttribute('data-tip', isPinned ? '取消釘選' : '釘選工具列');
+        if(isPinned) { clearTimeout(hideTimeout); sideTools.classList.add('active'); }
+    };
+
+    customBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (panel.style.display === 'grid') panel.style.display = 'none';
+        else { 
+            panel.style.display = 'grid'; 
+            const btnRect = customBtn.getBoundingClientRect();
+            panel.style.left = (btnRect.left - panel.offsetWidth - 20) + 'px';
+            panel.style.top = btnRect.top + 'px';
+        }
+    };
+
+    // 綜合修正邏輯：處理頂部與側邊工具列的顯示/隱藏
+    document.addEventListener('mousemove', (e) => {
+        cursor.style.left = e.clientX + 'px'; cursor.style.top = e.clientY + 'px';
+        
+        // 修正1：頂部感應 (僅在全螢幕時自動隱藏/顯示)
+        if (e.clientY < 60) topControls.classList.add('reveal');
+        else topControls.classList.remove('reveal');
+
+        // 修正2：側邊感應 (30px 顯示, 200px 外開始 5秒倒數)
+        const distFromRight = window.innerWidth - e.clientX;
+        if (distFromRight < 30) {
+            clearTimeout(hideTimeout);
+            sideTools.classList.add('active');
+            hideTimeout = null;
+        } else if (distFromRight > 200) {
+            if (!isPinned && panel.style.display !== 'grid' && !hideTimeout) {
+                hideTimeout = setTimeout(() => {
+                    sideTools.classList.remove('active');
+                    hideTimeout = null;
+                }, HIDE_DELAY);
+            }
+        }
+    });
+
+    function getPos(e) { let x = e.clientX; if (mirrored) x = canvas.width - x; return { x: x, y: e.clientY }; }
+    canvas.onmousedown = (e) => { 
+        if (panel.style.display === 'grid') { panel.style.display = 'none'; return; }
+        currentPath = { points: [getPos(e)], color: drawMode === 'eraser' ? 'eraser' : currentColor, size: parseInt(slider.value), type: drawMode };
+        redoStack = []; 
+    };
+    canvas.onmousemove = (e) => { if (!currentPath) return; currentPath.points.push(getPos(e)); redraw(); };
+    canvas.onmouseup = () => { if (!currentPath) return; paths.push(currentPath); currentPath = null; redraw(); };
+
+    function redraw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height); hCtx.clearRect(0, 0, hCanvas.width, hCanvas.height);
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round'; hCtx.lineCap = 'round'; hCtx.lineJoin = 'round';
+        function renderPath(p, targetCtx) {
+            if (p.color === 'eraser') {
+                targetCtx.globalCompositeOperation = 'destination-out';
+                targetCtx.lineWidth = p.size;
+                targetCtx.beginPath();
+                targetCtx.moveTo(p.points[0].x, p.points[0].y);
+                p.points.forEach(pt => targetCtx.lineTo(pt.x, pt.y));
+                targetCtx.stroke();
+            } else if (p.type === 'brush') {
+                targetCtx.globalCompositeOperation = 'source-over';
+                targetCtx.strokeStyle = p.color;
+                for (let i = 1; i < p.points.length; i++) {
+                    const prog = i / p.points.length;
+                    let scale = (prog < 0.2) ? prog / 0.2 : (prog > 0.8) ? (1 - prog) / 0.2 : 1.0;
+                    targetCtx.lineWidth = Math.max(0.5, p.size * scale);
+                    targetCtx.beginPath();
+                    targetCtx.moveTo(p.points[i-1].x, p.points[i-1].y);
+                    targetCtx.lineTo(p.points[i].x, p.points[i].y);
+                    targetCtx.stroke();
+                }
+            } else {
+                targetCtx.globalCompositeOperation = 'source-over';
+                targetCtx.strokeStyle = p.color;
+                targetCtx.lineWidth = p.size;
+                targetCtx.beginPath();
+                targetCtx.moveTo(p.points[0].x, p.points[0].y);
+                p.points.forEach(pt => targetCtx.lineTo(pt.x, pt.y));
+                targetCtx.stroke();
+            }
+        }
+        paths.concat(currentPath ? [currentPath] : []).forEach(p => {
+            if (p.color === 'eraser') { renderPath(p, ctx); renderPath(p, hCtx); }
+            else if (p.type === 'highlighter') { renderPath(p, hCtx); }
+            else { renderPath(p, ctx); }
+        });
+        ctx.save(); ctx.globalAlpha = 0.4; ctx.globalCompositeOperation = 'source-over'; ctx.drawImage(hCanvas, 0, 0); ctx.restore();
+    }
+
+    function setMode(mode, btnId) { drawMode = mode; document.querySelectorAll('.side-btn').forEach(b => b.classList.remove('active')); document.getElementById(btnId).classList.add('active'); }
+    document.getElementById('brushBtn').onclick = () => setMode('brush', 'brushBtn');
+    document.getElementById('pencilBtn').onclick = () => setMode('pencil', 'pencilBtn');
+    document.getElementById('highlighterBtn').onclick = () => setMode('highlighter', 'highlighterBtn');
+    document.getElementById('eraserBtn').onclick = () => setMode('eraser', 'eraserBtn');
+    document.querySelectorAll('.color-dot:not(#customColorBtn)').forEach(dot => { dot.onclick = () => { if (drawMode === 'eraser') setMode('brush', 'brushBtn'); document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active')); dot.classList.add('active'); currentColor = dot.dataset.color; }; });
+    document.getElementById('undoBtn').onclick = () => { if(paths.length) { redoStack.push(paths.pop()); redraw(); } };
+    document.getElementById('redoBtn').onclick = () => { if(redoStack.length) { paths.push(redoStack.pop()); redraw(); } };
+    document.getElementById('clearBtn').onclick = () => { paths = []; redraw(); };
+    document.getElementById('flipBtn').onclick = () => { mirrored = !mirrored; const s = mirrored ? 'scaleX(-1)' : 'scaleX(1)'; v.style.transform = s; canvas.style.transform = s; };
+    document.getElementById('guideBtn').onclick = () => { const gs = document.querySelectorAll('.guide'); const isVisible = gs[0].style.display === 'block'; gs.forEach(g => g.style.display = isVisible ? 'none' : 'block'); };
+    function toggleFS() { 
+        if (!document.fullscreenElement) { 
+            document.documentElement.requestFullscreen(); 
+            document.getElementById('main-body').classList.add('is-fullscreen');
+            fsBtn.setAttribute('data-tip', '恢復視窗'); 
+        } else { 
+            document.exitFullscreen(); 
+            document.getElementById('main-body').classList.add('is-fullscreen'); // 此處應為 remove，但依照教學邏輯維持類名管理
+            document.getElementById('main-body').classList.remove('is-fullscreen');
+            fsBtn.setAttribute('data-tip', '全螢幕'); 
+        } 
+    }
+    document.getElementById('capBtn').onclick = () => { const tc = document.createElement('canvas'); tc.width = canvas.width; tc.height = canvas.height; const tctx = tc.getContext('2d'); if(mirrored) { tctx.translate(tc.width, 0); tctx.scale(-1, 1); } tctx.drawImage(v, 0, 0, tc.width, tc.height); tctx.drawImage(canvas, 0, 0); const link = document.createElement('a'); link.download = `Design-${Date.now()}.png`; link.href = tc.toDataURL(); link.click(); };
+</script>
+</body>
+</html>
